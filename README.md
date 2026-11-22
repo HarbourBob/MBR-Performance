@@ -1,15 +1,15 @@
 # MBR Performance
 
-Granular, transparent WordPress performance optimisation — full page caching, plus individual
-control over core features, scripts, styles, fonts, images, preloading, the database, WooCommerce
-and multisite.
+Granular, transparent WordPress performance optimisation — full page caching and a Memcached
+object cache, plus individual control over core features, scripts, styles, fonts, images, preloading,
+the database, WooCommerce and multisite.
 
 Free, GPL-licensed, self-hosted. No telemetry, no CDN dependency for the plugin's own assets, and
 no account to sign up for.
 
-**Current version:** 2.1.5
+**Current version:** 2.2.0
 **Requires:** WordPress 5.9+ · PHP 7.4+
-**Tested to:** WordPress 7.1
+**Tested to:** WordPress 7.0
 **Licence:** GPLv2 or later
 
 ---
@@ -50,14 +50,36 @@ Each tier degrades to the next. No configuration produces an error page rather t
   with `DONOTCACHEPAGE`.
 - **Refuses to run** alongside another page cache, naming the plugin responsible.
 
+### Object cache — Memcached (new in 2.2.0)
+
+Page caching saves finished pages; the object cache saves the database results WordPress builds them
+from, in Memcached, so they aren't fetched again on every request. It speeds up everything a page cache
+can't serve — logged-in visitors, wp-admin, WooCommerce carts and checkout, search, AJAX and REST.
+
+- **Set up from the Cache tab.** Enter the IP address and port, press **Test Connection**, tick
+  **Enable Object Cache** and save. `wp-content/object-cache.php` is installed for you and removed again
+  when you switch it off or deactivate.
+- **Tested before it's trusted.** The server is checked before the cache switches on, and pointing a
+  running cache at an address that doesn't answer keeps the working server.
+- **Never takes the site down.** If the PHP extension is missing or Memcached stops answering, it carries
+  on from memory, exactly as WordPress does with no object cache. On a single site, transients go back to
+  the database meanwhile.
+- **Nothing stale after an outage.** A change saved while Memcached was unreachable triggers one flush on
+  reconnect. Each switch-on starts a fresh key space.
+- **Plays well with others.** Flushes clear only this site's keys, so a shared Memcached is safe, and
+  another plugin's `object-cache.php` is never overwritten.
+- **Passes WordPress core's object-cache test suite**, on single sites and multisite.
+
 ### Everything else
 
 - **Core** — emojis, embeds, dashicons, heartbeat, revisions, REST hardening, HTML minification
 - **JavaScript** — defer/async, footer moves, jQuery control, minify, combine, delayed execution,
   Script Modules and Interactivity API support (WP 6.5+)
 - **CSS** — Used CSS Mode A (per page, originals deferred) and Mode B (per template, analysed
-  sheets removed), async loading, minify, combine, paste-in Critical CSS
-- **Fonts** — self-hosting with auto-download, subsetting, preloading, `font-display` strategies
+  sheets removed), async loading, minify, combine, paste-in Critical CSS, `content-visibility: auto`
+  for off-screen sections (new in 2.2.0)
+- **Fonts** — self-hosting with auto-download, metric-matched fallback faces that stop font-swap layout
+  shift (new in 2.2.0), subsetting, preloading, `font-display` strategies
 - **Images** — WebP and AVIF conversion with bulk converter, automatic dimensions, lazy loading
 - **Preloading** — DNS prefetch, preconnect, speculative loading, hover prefetch
 - **Database** — revisions, transients, spam, orphaned metadata, table optimisation
@@ -77,7 +99,7 @@ Or clone into `wp-content/plugins/`:
 git clone https://github.com/HarbourBob/mbr-performance.git
 ```
 
-Settings live under **MBR Performance** in the admin toolbar. A 45-page user guide (PDF) is bundled
+Settings live under **MBR Performance** in the admin toolbar. A 48-page user guide (PDF) is bundled
 in the ZIP.
 
 ### Enabling page caching
@@ -92,6 +114,20 @@ same applies to `.htaccess`.
 
 If your host makes `wp-config.php` read-only, the Cache tab says so and shows the one line to add by
 hand. Until then caching still works, just on the slower tier.
+
+### Enabling the object cache
+
+You need a Memcached server — most hosts that offer one switch it on from the control panel (on
+SiteGround: Speed → Caching → Memcached) — and the PHP `memcached` extension. Then, on the Cache tab,
+fill in the IP address and port, press **Test Connection**, tick **Enable Object Cache** and save.
+
+Optional overrides in `wp-config.php`:
+
+```php
+define( 'MBRPE_MEMCACHED_HOST', '127.0.0.1' );   // or the path to a Unix socket
+define( 'MBRPE_MEMCACHED_PORT', 11211 );
+define( 'MBRPE_OBJECT_CACHE_DISABLED', true );   // emergency off switch: runs from memory only
+```
 
 ---
 
@@ -116,7 +152,12 @@ includes/
   class-page-cache-purge.php     purge events and related-URL resolution
   class-page-cache-rules.php     .htaccess rules and Nginx snippet
   class-opcache.php              OPcache status, flush and invalidation helpers
-  dropins/advanced-cache.php     the drop-in template (self-contained)
+  class-object-cache.php         object-cache drop-in installer, status, test and flush
+  class-font-metrics.php         TrueType/OpenType/WOFF metrics parser and fallback overrides
+  class-font-fallback.php        font measuring, fallback faces and font-family rewriting
+  class-render-optimizations.php content-visibility for off-screen sections
+  dropins/advanced-cache.php     the page-cache drop-in template (self-contained)
+  dropins/object-cache.php       the Memcached object-cache drop-in template (self-contained)
   admin/tabs/                    one file per settings tab
 ```
 
