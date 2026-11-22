@@ -1,19 +1,19 @@
 === MBR Performance ===
-Tags: performance, optimization, speed, cache, page cache, database, webp
+Tags: performance, optimization, speed, cache, page cache, object cache, memcached, database, webp
 Requires at least: 5.9
-Tested up to: 7.1
+Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 2.1.5
+Stable tag: 2.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Comprehensive WordPress performance plugin: full page caching plus granular controls for core features, JavaScript, CSS, fonts, lazy loading, preloading, database optimization, WebP image conversion, automatic image sizing, orphaned media cleanup, and WooCommerce optimisations.
+Comprehensive WordPress performance plugin: full page caching and a Memcached object cache, plus granular controls for core features, JavaScript, CSS, fonts, lazy loading, preloading, database optimization, WebP image conversion, automatic image sizing, orphaned media cleanup, and WooCommerce optimisations.
 
 == Description ==
 
 MBR Performance is a powerful, all-in-one performance optimization plugin that gives you complete control over your WordPress site's performance.
 
-As of 2.0.0 it includes a full page cache, so it no longer needs a separate caching plugin alongside it. If you already run one, MBR Performance detects it and leaves page caching switched off rather than fighting it — every other optimisation continues to work as before.
+As of 2.0.0 it includes a full page cache, so it no longer needs a separate caching plugin alongside it, and from 2.2.0 a persistent object cache backed by Memcached. If you already run one, MBR Performance detects it and leaves page caching switched off rather than fighting it — every other optimisation continues to work as before.
 
 A comprehensive User Guide (PDF) is bundled in the ZIP file.
 
@@ -28,6 +28,18 @@ A comprehensive User Guide (PDF) is bundled in the ZIP file.
 * X-MBR-Cache response headers reporting HIT, MISS or BYPASS with the specific reason, so you can see exactly why any page is or isn't cached
 * Optional separate mobile cache, 404 caching, feed caching and TTL expiry
 * Refuses to run alongside another page cache, rather than producing content neither plugin can explain
+
+**Object Cache — Memcached (new in 2.2.0)**
+* Persistent object cache on the Cache tab: enter the IP address and port, press Test Connection, tick Enable Object Cache and save — the object-cache.php drop-in is installed for you and removed again when you switch it off or deactivate
+* Speeds up everything a page cache cannot serve: logged-in visitors, wp-admin, WooCommerce carts and checkout, search, AJAX and REST requests, and satisfies Site Health's persistent object cache recommendation
+* The server is tested before the cache is switched on; changing the address of a running cache to one that does not answer keeps the working server
+* Never takes the site down: if the PHP extension is missing or Memcached stops answering, it carries on from memory exactly as WordPress does without an object cache, and on a single site transients go back to the database meanwhile
+* Nothing stale after an outage: a change saved while Memcached was unreachable triggers a single flush when it reconnects
+* Each switch-on starts a fresh key space; flushes clear only this site's entries, so other sites sharing the server are unaffected
+* Status panel with extension, drop-in state, this page load's hits and misses, and server memory, hit rate and evictions; Flush Object Cache on the tab and in the toolbar
+* Never overwrites an object-cache.php belonging to another plugin or your host
+* Multisite aware: one drop-in for the network, managed from the main site, with per-site keys and shared global groups
+* Optional MBRPE_MEMCACHED_HOST, MBRPE_MEMCACHED_PORT and MBRPE_OBJECT_CACHE_DISABLED constants in wp-config.php; Unix sockets supported
 
 **Core Features**
 * Disable unnecessary WordPress features (emojis, embeds, dashicons, etc.)
@@ -50,6 +62,7 @@ A comprehensive User Guide (PDF) is bundled in the ZIP file.
 **CSS Optimization**
 * Used CSS (Mode A) — inline each page's critical CSS and asynchronously load the full stylesheets, eliminating render-blocking unused CSS while keeping the originals as a safety net
 * Used CSS Mode B — per-template analysis that removes the analysed stylesheets outright instead of deferring them, learned from several sampled URLs per template, with a selector safelist as the guard rail
+* Skip rendering off-screen sections (new in 2.2.0) — content-visibility: auto on a list of top-level section selectors, with defaults for Elementor, Divi, Beaver Builder, Bricks, Oxygen, Kadence and block groups, leaving the first sections in each container alone so the hero is never deferred
 * Async CSS loading
 * Minify and combine CSS files
 * Preload combined CSS for earlier fetch (skipped when Async CSS is on)
@@ -61,6 +74,7 @@ A comprehensive User Guide (PDF) is bundled in the ZIP file.
 **Font Optimization**
 * Preload critical fonts
 * Self-host Google Fonts with auto-download
+* Font fallback metrics (new in 2.2.0) — a metric-matched "Family Fallback" face for each self-hosted family (Arial, Times New Roman or Courier New with size-adjust and ascent, descent and line-gap overrides), added to your font-family stacks automatically, so text no longer shifts when the web font arrives
 * Manual font management
 * Font subsetting for reduced file sizes
 * Preconnect to font domains
@@ -226,6 +240,10 @@ No. Enabling page caching installs the advanced-cache.php drop-in and adds the W
 
 If your host makes wp-config.php read-only — some managed hosts do — the Cache tab says so and shows you the single line to add by hand. Until you do, caching still works; pages are served from inside WordPress instead of before it, which is slower but still a substantial improvement.
 
+= Do I need the object cache as well as page caching? =
+
+They do different jobs. The page cache serves finished pages to anonymous visitors without WordPress running at all. The object cache (Cache tab, from 2.2.0) keeps WordPress's database results in Memcached between requests, so every request that does run WordPress — admin screens, logged-in members, the cart and checkout, AJAX and REST — gets cheaper. A brochure site gains most from the page cache; a shop or membership site benefits from both. You need a Memcached server (most hosts that offer one switch it on from the control panel) and the PHP "memcached" extension; the Cache tab tells you whether both are there.
+
 = Why isn't a particular page being cached? =
 
 Switch on "Send Debug Headers" on the Cache tab and load the page. Every response then carries X-MBR-Cache with one of HIT, MISS or BYPASS, and a bypass also carries X-MBR-Cache-Reason naming the specific rule — logged-in, excluded-cookie, excluded-uri, password-protected, DONOTCACHEPAGE, search, preview and so on.
@@ -284,6 +302,8 @@ This plugin can connect to the third-party services listed below. Each is option
 
 When you enable "Self-host Google Fonts" and download a font from the Fonts tab, your server contacts the Google Fonts API at fonts.googleapis.com to retrieve the font's stylesheet, and Google's font CDN at fonts.gstatic.com to download the font files. The files are then stored on your own server and served locally, so your visitors' browsers do not contact Google. The request is made by your server only at the moment you trigger a download in the admin area. It sends the requested font family name(s) and the information present in any standard HTTP request (such as your server's IP address and user agent); no website-visitor data is sent.
 
+With "Match Fallback Font Metrics" also enabled (2.2.0), your server fetches a TrueType copy of each self-hosted family from the same two hosts, once, when you save the Fonts tab or download fonts, so it can measure the font. The copy is discarded after measuring, and the request carries nothing beyond the family name and weight and standard request information.
+
 This service is provided by Google. Google Terms of Service: https://policies.google.com/terms — Google Privacy Policy: https://policies.google.com/privacy — Google Fonts privacy details: https://developers.google.com/fonts/faq/privacy
 
 = YouTube (Video facade feature) =
@@ -297,6 +317,10 @@ This service is provided by Google/YouTube. YouTube Terms of Service: https://ww
 When the video facade is enabled and a page contains an embedded Vimeo video, the plugin shows a lightweight placeholder instead of the full embed. To display a preview image, the visitor's browser requests the video's public metadata from Vimeo's API at vimeo.com/api/v2/video/{id}.json, which returns the thumbnail URL. The full Vimeo player is loaded only if the visitor clicks to play. The request is made by the visitor's browser and includes the visitor's IP address and the Vimeo video ID.
 
 This service is provided by Vimeo. Vimeo Terms of Service: https://vimeo.com/terms — Vimeo Privacy Policy: https://vimeo.com/privacy
+
+= Memcached (Object cache feature) — your own server =
+
+The object cache connects to the Memcached server whose address you enter on the Cache tab — normally one running on your own hosting account, at 127.0.0.1. It is not a third-party service: it holds what WordPress's own object cache holds, on a server you control, and nothing is sent anywhere else.
 
 = Real User Monitoring (RUM feature) — no external service =
 
@@ -312,6 +336,21 @@ The Used CSS feature bundles two open-source libraries, loaded only while genera
 
 
 == Changelog ==
+
+= 2.2.0 =
+A Memcached object cache, metric-matched font fallbacks, and an option to skip rendering off-screen sections. All three are off until you switch them on.
+
+* New: persistent object cache backed by Memcached, on the Cache tab. Enter the IP address and port, press Test Connection, tick Enable Object Cache and save; wp-content/object-cache.php is installed for you and removed again when you switch it off or deactivate. The server is tested before the cache is switched on, and changing the address of a running cache to one that does not answer keeps the working server.
+* New: the object cache never takes the site down. If the PHP extension is missing or Memcached stops answering, it carries on from memory, exactly as WordPress does with no object cache — on a single site, transients go back to the database meanwhile, so WP-Cron's lock keeps working — and the first request to reconnect flushes once, so nothing that changed during the outage is served stale.
+* New: each switch-on starts a fresh key space, so nothing cached before the cache was last switched off is ever read back. Flushes clear only this site's entries, leaving other sites on a shared Memcached untouched. An object-cache.php belonging to another plugin or your host is never overwritten.
+* New: a status panel (extension, drop-in, this page load's hits and misses, server memory, hit rate and evictions), Flush Object Cache on the tab and in the toolbar menu, and optional MBRPE_MEMCACHED_HOST, MBRPE_MEMCACHED_PORT and MBRPE_OBJECT_CACHE_DISABLED constants. The drop-in passes WordPress core's own object-cache test suite on single sites and multisite.
+* New: Match Fallback Font Metrics (Fonts tab). Each self-hosted Google Font family is measured once and given a "Family Fallback" face — Arial, Times New Roman or Courier New, resized with size-adjust and re-spaced with ascent, descent and line-gap overrides — so text keeps its line breaks when the web font arrives. The fallback can be changed per family.
+* New: Add Fallbacks to Font Stacks puts the fallback straight after each self-hosted family in every font-family declaration — inline CSS, style attributes and local stylesheets, the last served from rewritten copies in /uploads/mbr-performance-fontfallback/ — so the browser actually uses it.
+* New: Skip Rendering Off-Screen Sections (CSS tab, Rendering). Adds content-visibility: auto to a list of top-level section selectors, with defaults for Elementor, Divi, Beaver Builder, Bricks, Oxygen, Kadence and block groups. The first sections in each container are left alone, so the hero and the LCP element are never deferred.
+* Fix: Combine CSS lost stylesheets on block themes. WordPress inlines small stylesheets itself by reading the file named in a handle's path data, and after combining that still named the first file of the bundle, so WordPress printed that one file in place of the bundle and every other sheet merged into it went missing. It now names the bundle.
+* Fix: saving the Cache tab applied the previous settings. Switching page caching on only installed the drop-in on the second save, and changes to exclusions reached the drop-in's configuration one save late. Settings are now re-read the moment they are saved.
+* Docs: the user guide is updated to 2.2.0 — a new section 22 on the object cache, font fallback metrics in section 7, off-screen rendering in section 6, and six new Troubleshooting entries.
+* Updating clears the page cache once.
 
 = 2.1.5 =
 No more "strip_tags(): Passing null" deprecation notice on the settings screen.
@@ -703,6 +742,9 @@ This release prepares the plugin for the WordPress.org plugin directory and incl
 * Database optimization
 
 == Upgrade Notice ==
+
+= 2.2.0 =
+Adds a Memcached object cache, font fallback metrics and off-screen rendering, all off by default. Fixes Combine CSS losing stylesheets on block themes and Cache tab settings taking two saves. Updating clears the page cache once.
 
 = 2.1.5 =
 Removes a PHP 8.1+ "strip_tags(): Passing null" deprecation notice on the settings screen, and gives the screen a proper browser-tab title.

@@ -68,6 +68,10 @@ function mbrpe_uninstall_option_names() {
 		'mbrpe_webp_registry_migrated',
 		'mbrpe_avif_converted_images',
 		'mbrpe_avif_registry',
+		// 2.2.0.
+		'mbrpe_object_cache_state',
+		'mbrpe_carried_settings_errors',
+		'mbrpe_font_metrics',
 	);
 }
 
@@ -99,6 +103,7 @@ function mbrpe_uninstall_cache_dirs() {
 		'mbr-performance-min',
 		'mbr-performance-usedcss',
 		'mbr-performance-usedcss-b',
+		'mbr-performance-fontfallback',
 	);
 }
 
@@ -128,9 +133,10 @@ function mbrpe_uninstall_rmdir( $dir ) {
 		return;
 	}
 
-	// The minified-asset cache mirrors the source tree in subdirectories;
-	// walk it without following links. Every other cache is one level deep.
-	if ( 'mbr-performance-min' === basename( $real ) ) {
+	// The minified-asset and font-fallback caches mirror the source tree in
+	// subdirectories; walk them without following links. Every other cache is
+	// one level deep.
+	if ( in_array( basename( $real ), array( 'mbr-performance-min', 'mbr-performance-fontfallback' ), true ) ) {
 		try {
 			$it = new RecursiveIteratorIterator(
 				new RecursiveDirectoryIterator( $real, FilesystemIterator::SKIP_DOTS ),
@@ -248,6 +254,22 @@ if ( is_multisite() ) {
 	delete_site_option( 'mbrpe_allow_site_overrides' );
 } else {
 	mbrpe_uninstall_site();
+}
+
+// The object-cache drop-in is removed on deactivation, which always precedes
+// deletion. This is a second line of defence for an install where that did
+// not happen: a drop-in with no plugin behind it would go on caching with
+// nothing left to switch it off. Only ever our own file.
+$mbrpe_oc_dropin = WP_CONTENT_DIR . '/object-cache.php';
+if ( is_file( $mbrpe_oc_dropin ) ) {
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Reading the header of a local drop-in.
+	$mbrpe_oc_head = @file_get_contents( $mbrpe_oc_dropin, false, null, 0, 8192 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+	if ( is_string( $mbrpe_oc_head ) && false !== strpos( $mbrpe_oc_head, 'MBRPE_OBJECT_CACHE_VERSION' ) ) {
+		wp_delete_file( $mbrpe_oc_dropin );
+	}
+}
+if ( is_file( WP_CONTENT_DIR . '/.mbrpe-object-cache-flush' ) ) {
+	wp_delete_file( WP_CONTENT_DIR . '/.mbrpe-object-cache-flush' );
 }
 
 // OPcache last-flush record. A network option on multisite (OPcache is per
