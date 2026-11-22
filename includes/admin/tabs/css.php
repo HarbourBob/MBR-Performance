@@ -225,7 +225,7 @@ $css_options = isset( $options['css'] ) ? $options['css'] : array();
                 <td>
                     <input type="number" name="mbrpe_options[css][modeb_samples]" id="modeb_samples" min="1" max="10" step="1" class="small-text" value="<?php echo esc_attr( isset( $css_options['modeb_samples'] ) ? (int) $css_options['modeb_samples'] : 3 ); ?>">
                     <p class="description">
-                        <?php esc_html_e( 'Mode B keeps the sum of what every sampled URL used, so a rule that only one of your posts needs still survives for all of them. Raising this makes each template safer and slower to settle; lowering it does the reverse. Three suits most sites. Those first few visits per template render normally, with nothing removed.', 'mbr-performance' ); ?>
+                        <?php esc_html_e( 'Mode B keeps the sum of what every sampled URL used, so a rule that only one of your posts needs still survives for all of them. Raising this makes each template safer and slower to settle; lowering it does the reverse. Three suits most sites. Those first few visits per template render normally, with nothing removed. Templates with only one URL — a static front page, the cart, the checkout — need just that one visit.', 'mbr-performance' ); ?>
                     </p>
                 </td>
             </tr>
@@ -278,7 +278,10 @@ $css_options = isset( $options['css'] ) ? $options['css'] : array();
                             <thead>
                                 <tr>
                                     <th><?php esc_html_e( 'Template', 'mbr-performance' ); ?></th>
-                                    <th><?php esc_html_e( 'Samples', 'mbr-performance' ); ?></th>
+                                    <th>
+                                        <?php esc_html_e( 'Samples', 'mbr-performance' ); ?>
+                                        <span class="mbr-tooltip" data-tip="<?php esc_attr_e( 'Distinct URLs this template has learned from. Templates that only ever have one URL — a static front page, the cart, the checkout — are learned from that single URL, so their target is 1 regardless of the setting above.', 'mbr-performance' ); ?>">?</span>
+                                    </th>
                                     <th><?php esc_html_e( 'Sheets replaced', 'mbr-performance' ); ?></th>
                                     <th><?php esc_html_e( 'Inlined size', 'mbr-performance' ); ?></th>
                                     <th><?php esc_html_e( 'Status', 'mbr-performance' ); ?></th>
@@ -347,6 +350,69 @@ $css_options = isset( $options['css'] ) ? $options['css'] : array();
         </table>
     </div>
     
+    <!-- Rendering Section (2.2.0) -->
+    <?php
+    $cv_selectors = isset( $css_options['cv_selectors'] ) ? (string) $css_options['cv_selectors'] : MBRPE_Render_Optimizations::default_selectors();
+    $cv_skip      = isset( $css_options['cv_skip'] ) ? (int) $css_options['cv_skip'] : MBRPE_Render_Optimizations::DEFAULT_SKIP;
+    $cv_height    = isset( $css_options['cv_height'] ) ? (int) $css_options['cv_height'] : MBRPE_Render_Optimizations::DEFAULT_HEIGHT;
+    ?>
+    <div class="mbr-performance-section">
+        <h2><?php esc_html_e( 'Rendering', 'mbr-performance' ); ?></h2>
+        <table class="form-table">
+            <tr>
+                <th scope="row">
+                    <label for="cv_enabled">
+                        <?php esc_html_e( 'Skip Rendering Off-Screen Sections', 'mbr-performance' ); ?>
+                        <span class="mbr-tooltip" data-tip="<?php esc_attr_e( 'Adds content-visibility: auto to the sections listed below, so the browser does not lay out or paint them until they are about to scroll into view.', 'mbr-performance' ); ?>">?</span>
+                    </label>
+                </th>
+                <td>
+                    <input type="checkbox" name="mbrpe_options[css][cv_enabled]" id="cv_enabled" value="1" <?php checked( ! empty( $css_options['cv_enabled'] ) ); ?>>
+                    <p class="description">
+                        <?php esc_html_e( 'A real rendering and responsiveness (INP) gain on long posts and page-builder pages, where most of the page starts off-screen. Test on staging first, and check these, which are the known side effects:', 'mbr-performance' ); ?>
+                    </p>
+                    <ul class="description" style="list-style:disc;margin-left:1.5em;max-width:780px;">
+                        <li><?php esc_html_e( 'Anything that deliberately spills out of its section — overlapping images, negative-margin layouts, a dropdown that hangs below its row, a box-shadow — is clipped at the section\'s edge. Leave those sections out of the list, or raise the number left alone.', 'mbr-performance' ); ?></li>
+                        <li><?php esc_html_e( 'Fixed-position elements inside an affected section — some popups, back-to-top buttons, and sticky effects that work by switching to position: fixed, as Elementor\'s does — are positioned relative to that section rather than the window.', 'mbr-performance' ); ?></li>
+                        <li><?php esc_html_e( 'Until a section has been rendered once its height is an estimate, so the scrollbar can shift a little and an in-page #link jumping far down the page can land slightly off target.', 'mbr-performance' ); ?></li>
+                    </ul>
+                </td>
+            </tr>
+            <tr class="mbr-performance-child-row">
+                <th scope="row">
+                    <label for="cv_selectors">
+                        <?php esc_html_e( 'Sections', 'mbr-performance' ); ?>
+                        <span class="mbr-tooltip" data-tip="<?php esc_attr_e( 'CSS selectors for your page\'s top-level sections, one per line.', 'mbr-performance' ); ?>">?</span>
+                    </label>
+                </th>
+                <td>
+                    <textarea name="mbrpe_options[css][cv_selectors]" id="cv_selectors" rows="7" class="large-text code" spellcheck="false"><?php echo esc_textarea( $cv_selectors ); ?></textarea>
+                    <p class="description">
+                        <?php esc_html_e( 'The defaults cover the top-level sections of Elementor (classic sections and containers), Divi, Beaver Builder, Bricks, Oxygen and Kadence, and full-width groups in block content. Use top-level sections only: applying this to small elements such as paragraphs costs more than it saves. Anything that is not a plain selector is removed on save.', 'mbr-performance' ); ?>
+                    </p>
+                </td>
+            </tr>
+            <tr class="mbr-performance-child-row">
+                <th scope="row">
+                    <label for="cv_skip"><?php esc_html_e( 'Leave the First Sections Alone', 'mbr-performance' ); ?></label>
+                </th>
+                <td>
+                    <input type="number" name="mbrpe_options[css][cv_skip]" id="cv_skip" class="small-text" min="0" max="20" step="1" value="<?php echo esc_attr( $cv_skip ); ?>">
+                    <p class="description"><?php esc_html_e( 'How many matching sections at the top of each container are always rendered normally, so the hero and the largest contentful paint are never deferred. Counted separately in the header, the content and the footer. Two is a safe start.', 'mbr-performance' ); ?></p>
+                </td>
+            </tr>
+            <tr class="mbr-performance-child-row">
+                <th scope="row">
+                    <label for="cv_height"><?php esc_html_e( 'Estimated Section Height', 'mbr-performance' ); ?></label>
+                </th>
+                <td>
+                    <input type="number" name="mbrpe_options[css][cv_height]" id="cv_height" class="small-text" min="50" max="5000" step="10" value="<?php echo esc_attr( $cv_height ); ?>"> px
+                    <p class="description"><?php esc_html_e( 'Placeholder height for a section that has not been rendered yet. Once it has, the browser remembers its real height. Closer to your typical section height means a steadier scrollbar.', 'mbr-performance' ); ?></p>
+                </td>
+            </tr>
+        </table>
+    </div>
+
     <!-- Advanced Options Section -->
     <div class="mbr-performance-section">
         <h2><?php esc_html_e( 'Advanced Options', 'mbr-performance' ); ?></h2>

@@ -254,6 +254,21 @@ class MBRPE {
         // the page-cache drop-in manager calls its static invalidate() after
         // every PHP file it writes, whether or not anyone opens Diagnostics.
         require_once MBRPE_PLUGIN_DIR . 'includes/class-opcache.php';
+
+        // ====================================================================
+        // v2.2.0 additions
+        // ====================================================================
+
+        // Persistent object cache (Memcached) — manages wp-content/object-cache.php.
+        require_once MBRPE_PLUGIN_DIR . 'includes/class-object-cache.php';
+
+        // Font fallback metrics: font-file parser, then the module that measures
+        // self-hosted families and points font-family stacks at the fallbacks.
+        require_once MBRPE_PLUGIN_DIR . 'includes/class-font-metrics.php';
+        require_once MBRPE_PLUGIN_DIR . 'includes/class-font-fallback.php';
+
+        // content-visibility: auto for long pages.
+        require_once MBRPE_PLUGIN_DIR . 'includes/class-render-optimizations.php';
     }
 
     /**
@@ -268,6 +283,14 @@ class MBRPE {
         // Initialize optimization modules on init hook
         // Priority 999 to run after most plugins, including page builders
         add_action( 'init', array( $this, 'init_optimizations' ), 999 );
+
+        // Forget the memoised options the moment they are saved. Every module
+        // reads them during init, which on an options.php save runs before the
+        // new values are written — so without this, the save handlers below saw
+        // the previous settings, and switching page caching on (or changing an
+        // exclusion) only took effect on the second save.
+        add_action( 'add_option_mbrpe_options', array( $this, 'forget_options' ), 0 );
+        add_action( 'update_option_mbrpe_options', array( $this, 'forget_options' ), 0 );
         
         // Initialize admin
         if ( is_admin() ) {
@@ -278,6 +301,10 @@ class MBRPE {
         // fallback. Not tied to init_optimizations(), which returns early in
         // editor contexts — a flush should work from anywhere.
         MBRPE_OPcache::instance();
+
+        // Object cache: flush routes, toolbar item and the Cache tab's AJAX.
+        // Same reasoning as OPcache above.
+        MBRPE_Object_Cache::instance();
         
         // Multisite: initialise network admin functionality
         if ( is_multisite() ) {
@@ -306,6 +333,14 @@ class MBRPE {
         // even when the cache module itself declines to instantiate — that is
         // exactly the state the repair buttons exist to fix.
         add_action( 'update_option_mbrpe_options', array( 'MBRPE_Page_Cache_Dropin', 'on_options_updated' ), 20 );
+
+        // Object cache: install, refresh or remove wp-content/object-cache.php
+        // to match the saved settings.
+        add_action( 'update_option_mbrpe_options', array( 'MBRPE_Object_Cache', 'on_options_updated' ), 21 );
+
+        // Font fallback metrics: measure any newly self-hosted family once the
+        // setting is on, and drop rewritten stylesheets that are now stale.
+        add_action( 'update_option_mbrpe_options', array( 'MBRPE_Font_Fallback', 'on_options_updated' ), 22 );
         if ( is_admin() ) {
             MBRPE_Page_Cache_Dropin::register_admin_actions();
         }
@@ -644,6 +679,47 @@ class MBRPE {
             }
         }
 
+        // 2.2.0: seed the new keys — the Memcached object cache on the Cache
+        // tab, font fallback metrics on the Fonts tab, and content-visibility
+        // on the CSS tab. Everything stays off: none of these may start
+        // changing how a site is served just because the plugin updated.
+        if ( version_compare( $stored, '2.2.0', '<' ) ) {
+            $opts = get_option( 'mbrpe_options', array() );
+            if ( is_array( $opts ) ) {
+                $defaults = $this->default_options();
+                foreach ( array( 'cache', 'fonts', 'css' ) as $section ) {
+                    if ( ! isset( $opts[ $section ] ) || ! is_array( $opts[ $section ] ) ) {
+                        $opts[ $section ] = array();
+                    }
+                    foreach ( $defaults[ $section ] as $key => $value ) {
+                        if ( ! isset( $opts[ $section ][ $key ] ) ) {
+                            $opts[ $section ][ $key ] = $value;
+                        }
+                    }
+                }
+                update_option( 'mbrpe_options', $opts );
+            }
+
+            // Combine CSS on block themes printed the first file of a bundle
+            // in place of the bundle until this release, so cached pages may
+            // be missing stylesheets. Rebuild them once.
+            if ( class_exists( 'MBRPE_Page_Cache_Purge' ) ) {
+                MBRPE_Page_Cache_Purge::purge_all( 'upgrade' );
+            }
+        }
+
+        // Any release: an object-cache.php from an older copy of this plugin is
+        // refreshed from the bundled template. It keeps its key space, so a
+        // warm cache survives the update.
+        if ( class_exists( 'MBRPE_Object_Cache' ) && 'ours-stale' === MBRPE_Object_Cache::dropin_state() ) {
+            $oc = MBRPE_Object_Cache::settings();
+            if ( $oc['enabled'] ) {
+                MBRPE_Object_Cache::install();
+            } else {
+                MBRPE_Object_Cache::uninstall();
+            }
+        }
+
         // Stamp the version once all migrations have completed.
         update_option( 'mbrpe_version', MBRPE_VERSION );
     }
@@ -720,6 +796,20 @@ class MBRPE {
         MBRPE_Server_Headers::instance();
         MBRPE_Hover_Prefetch::instance();
         MBRPE_Conflict_Detector::instance();
+
+        // v2.2.0 modules.
+        MBRPE_Font_Fallback::instance();
+        MBRPE_Render_Optimizations::instance();
+    }
+
+    /**
+     * Drop the memoised options so the next read comes from the database.
+     *
+     * @since 2.2.0
+     * @return void
+     */
+    public function forget_options() {
+        $this->options = array();
     }
     
     /**
@@ -802,8 +892,20 @@ class MBRPE {
                 'modeb_samples'    => MBRPE_Used_CSS_Mode_B::DEFAULT_SAMPLES,
                 'modeb_safelist'   => '',
                 'modeb_keep_sheets' => '',
+                // content-visibility: auto — off by default. See
+                // class-render-optimizations.php.
+                'cv_enabled'        => false,
+                'cv_selectors'      => MBRPE_Render_Optimizations::default_selectors(),
+                'cv_skip'           => MBRPE_Render_Optimizations::DEFAULT_SKIP,
+                'cv_height'         => MBRPE_Render_Optimizations::DEFAULT_HEIGHT,
             ),
-            'fonts'            => array(),
+            'fonts'            => array(
+                // Font fallback metrics — off by default. See
+                // class-font-fallback.php.
+                'fallback_metrics'   => false,
+                'fallback_rewrite'   => true,
+                'fallback_overrides' => array(),
+            ),
             'database'         => array(),
             'webp'             => array(),
             'woocommerce'      => array(),
@@ -839,6 +941,10 @@ class MBRPE {
                 'exclude_agents'      => '',
                 'ignored_qs'          => '',
                 'allowed_qs'          => '',
+                // Persistent object cache (Memcached). Off by default.
+                'memcached_enabled'   => false,
+                'memcached_host'      => MBRPE_Object_Cache::DEFAULT_HOST,
+                'memcached_port'      => MBRPE_Object_Cache::DEFAULT_PORT,
             ),
             'rum'            => array(
                 'enabled'            => false,
@@ -978,6 +1084,19 @@ class MBRPE {
         }
         if ( class_exists( 'MBRPE_Page_Cache_Dropin' ) ) {
             MBRPE_Page_Cache_Dropin::uninstall();
+        }
+
+        // Object cache: the same reasoning applies. A drop-in left behind would
+        // carry on caching with nothing left to explain or switch it off.
+        // Settings are kept, so reactivating and saving the Cache tab puts it
+        // back. Only the main site's deactivation removes it on multisite.
+        if ( class_exists( 'MBRPE_Object_Cache' ) && ( ! is_multisite() || is_main_site() ) ) {
+            MBRPE_Object_Cache::uninstall();
+        }
+
+        // Rewritten stylesheets for font fallbacks.
+        if ( class_exists( 'MBRPE_Font_Fallback' ) ) {
+            MBRPE_Font_Fallback::purge_rewritten();
         }
         
         // Flush rewrite rules

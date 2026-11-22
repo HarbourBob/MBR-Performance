@@ -793,6 +793,16 @@ class MBRPE_CSS_Optimizations {
         $carrier_obj->args = 'all'; // Broadest safe media for a general bundle.
         unset( $carrier_obj->extra['rtl'], $carrier_obj->extra['suffix'] );
 
+        // Core inlines small stylesheets by reading the file named in their
+        // 'path' data (wp_maybe_inline_styles(), used for block styles and on
+        // block themes). Left pointing at the carrier's original file, that
+        // printed the carrier's own CSS in place of the bundle, and every
+        // other sheet merged into it vanished from the page. Point it at the
+        // bundle, so a small bundle is still inlined — with the right CSS.
+        if ( ! empty( $carrier_obj->extra['path'] ) ) {
+            $carrier_obj->extra['path'] = $filepath;
+        }
+
         // Record the bundle for an early preload hint, if preloading is on.
         if ( $this->do_combine_preload ) {
             $this->combine_preload_urls[] = $fileurl;

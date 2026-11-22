@@ -166,6 +166,153 @@ $font_options = isset( $options['fonts'] ) ? $options['fonts'] : array();
         </table>
     </div>
     
+    <!-- Font Fallback Metrics Section (2.2.0) -->
+    <?php
+    $ff_on       = ! empty( $font_options['fallback_metrics'] );
+    $ff_rewrite  = ! isset( $font_options['fallback_rewrite'] ) || ! empty( $font_options['fallback_rewrite'] );
+    $ff_selfhost = ! empty( $font_options['self_host_google_fonts'] );
+    $ff_local    = MBRPE_Font_Fallback::local_families();
+    $ff_stored   = MBRPE_Font_Fallback::stored();
+    $ff_labels   = array(
+        'sans'  => __( 'Sans-serif — Arial', 'mbr-performance' ),
+        'serif' => __( 'Serif — Times New Roman', 'mbr-performance' ),
+        'mono'  => __( 'Monospace — Courier New', 'mbr-performance' ),
+    );
+    ?>
+    <div class="mbr-performance-section" id="mbrpe-font-fallbacks">
+        <h2><?php esc_html_e( 'Font Fallback Metrics', 'mbr-performance' ); ?></h2>
+        <p class="description" style="max-width:820px;">
+            <?php esc_html_e( 'While a web font downloads, text is drawn in a system font and then re-flows when the web font arrives, because the two are different sizes. That re-flow is layout shift (CLS). This adds a fallback face for each self-hosted family — Arial, Times New Roman or Courier New, resized and re-spaced with size-adjust and ascent, descent and line-gap overrides to take up the same room as the web font — so the swap is barely visible.', 'mbr-performance' ); ?>
+        </p>
+
+        <?php if ( ! $ff_selfhost ) : ?>
+            <div class="notice notice-info inline" style="margin:1em 0;">
+                <p><?php esc_html_e( 'Fallback metrics are measured from self-hosted fonts, so this needs Self-Host Google Fonts (above) switched on, with fonts downloaded.', 'mbr-performance' ); ?></p>
+            </div>
+        <?php endif; ?>
+
+        <table class="form-table">
+            <tr>
+                <th scope="row">
+                    <label for="fallback_metrics">
+                        <?php esc_html_e( 'Match Fallback Font Metrics', 'mbr-performance' ); ?>
+                        <span class="mbr-tooltip" data-tip="<?php esc_attr_e( 'Measures each self-hosted family once and declares a metric-matched fallback face for it.', 'mbr-performance' ); ?>">?</span>
+                    </label>
+                </th>
+                <td>
+                    <input type="checkbox" name="mbrpe_options[fonts][fallback_metrics]" id="fallback_metrics" value="1" <?php checked( $ff_on ); ?>>
+                    <p class="description"><?php esc_html_e( 'Measuring needs one short request to Google Fonts per family, made when you save or download fonts — never while visitors are browsing. A TrueType copy is fetched for measuring and then discarded, because PHP cannot read the WOFF2 files that are served.', 'mbr-performance' ); ?></p>
+                </td>
+            </tr>
+            <tr class="mbr-performance-child-row">
+                <th scope="row">
+                    <label for="fallback_rewrite">
+                        <?php esc_html_e( 'Add Fallbacks to Font Stacks', 'mbr-performance' ); ?>
+                        <span class="mbr-tooltip" data-tip="<?php esc_attr_e( 'A fallback face only helps if font-family lists it. This adds it automatically.', 'mbr-performance' ); ?>">?</span>
+                    </label>
+                </th>
+                <td>
+                    <input type="checkbox" name="mbrpe_options[fonts][fallback_rewrite]" id="fallback_rewrite" value="1" <?php checked( $ff_rewrite ); ?>>
+                    <p class="description">
+                        <?php esc_html_e( 'Rewrites font-family declarations so the fallback comes straight after the web font — font-family: "Inter", sans-serif becomes font-family: "Inter", "Inter Fallback", sans-serif — in inline CSS, style attributes and local stylesheets, which are served from rewritten copies in /uploads/mbr-performance-fontfallback/. Switch this off if you would rather add the "Family Fallback" names to your own CSS.', 'mbr-performance' ); ?>
+                    </p>
+                </td>
+            </tr>
+        </table>
+
+        <?php if ( ! empty( $ff_local ) ) : ?>
+            <table class="widefat striped" style="max-width:980px;margin-top:0.5em;">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e( 'Family', 'mbr-performance' ); ?></th>
+                        <th><?php esc_html_e( 'Fallback', 'mbr-performance' ); ?></th>
+                        <th>size-adjust</th>
+                        <th>ascent</th>
+                        <th>descent</th>
+                        <th>line-gap</th>
+                        <th><?php esc_html_e( 'Status', 'mbr-performance' ); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ( $ff_local as $ff_family => $ff_variants ) : ?>
+                    <?php
+                    $ff_key    = MBRPE_Font_Fallback::family_key( $ff_family );
+                    $ff_entry  = isset( $ff_stored[ $ff_key ] ) ? $ff_stored[ $ff_key ] : array();
+                    $ff_choice = MBRPE_Font_Fallback::chosen_category( $ff_family );
+                    $ff_auto   = isset( $ff_entry['category'] ) ? $ff_entry['category'] : '';
+                    $ff_cat    = 'auto' === $ff_choice ? ( $ff_auto ? $ff_auto : 'sans' ) : $ff_choice;
+                    $ff_o      = ! empty( $ff_entry['metrics'] ) ? MBRPE_Font_Metrics::overrides( $ff_entry['metrics'], $ff_cat ) : null;
+                    ?>
+                    <tr>
+                        <td><strong><?php echo esc_html( $ff_family ); ?></strong><br><code style="font-size:11px;">"<?php echo esc_html( MBRPE_Font_Metrics::fallback_name( $ff_family ) ); ?>"</code></td>
+                        <td>
+                            <select name="mbrpe_options[fonts][fallback_overrides][<?php echo esc_attr( $ff_key ); ?>]">
+                                <option value="auto" <?php selected( $ff_choice, 'auto' ); ?>>
+                                    <?php
+                                    echo esc_html(
+                                        $ff_auto
+                                            /* translators: %s: detected fallback, e.g. "Serif — Times New Roman" */
+                                            ? sprintf( __( 'Automatic (%s)', 'mbr-performance' ), $ff_labels[ $ff_auto ] )
+                                            : __( 'Automatic', 'mbr-performance' )
+                                    );
+                                    ?>
+                                </option>
+                                <?php foreach ( $ff_labels as $ff_value => $ff_label ) : ?>
+                                    <option value="<?php echo esc_attr( $ff_value ); ?>" <?php selected( $ff_choice, $ff_value ); ?>><?php echo esc_html( $ff_label ); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </td>
+                        <?php if ( $ff_o ) : ?>
+                            <td><?php echo esc_html( number_format( $ff_o['size_adjust'], 2 ) ); ?>%<?php echo $ff_o['width_matched'] ? '' : ' <span class="mbr-tooltip" data-tip="' . esc_attr__( 'The font has no basic Latin letters to measure, so its width is not adjusted — only its line height.', 'mbr-performance' ) . '">?</span>'; ?></td>
+                            <td><?php echo esc_html( number_format( $ff_o['ascent'], 2 ) ); ?>%</td>
+                            <td><?php echo esc_html( number_format( $ff_o['descent'], 2 ) ); ?>%</td>
+                            <td><?php echo esc_html( number_format( $ff_o['line_gap'], 2 ) ); ?>%</td>
+                            <td><span style="color:#1a7f37;">&#10003;</span> <?php esc_html_e( 'Measured', 'mbr-performance' ); ?></td>
+                        <?php elseif ( ! empty( $ff_entry['error'] ) ) : ?>
+                            <td colspan="4">&mdash;</td>
+                            <td><span style="color:#d63638;">&#10007;</span> <?php echo esc_html( $ff_entry['error'] ); ?></td>
+                        <?php else : ?>
+                            <td colspan="4">&mdash;</td>
+                            <td><span style="color:#8c8f94;">&#9679;</span> <?php esc_html_e( 'Not measured yet', 'mbr-performance' ); ?></td>
+                        <?php endif; ?>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+            <p>
+                <button type="button" class="button button-secondary" id="mbrpe-measure-fonts"><?php esc_html_e( 'Measure Fonts Now', 'mbr-performance' ); ?></button>
+                <span id="mbrpe-measure-fonts-result" class="description" style="margin-left:10px;white-space:pre-line;"></span>
+            </p>
+            <p class="description" style="max-width:820px;">
+                <?php esc_html_e( 'Automatic picks the fallback from the font itself — monospaced fonts get Courier New, serifs Times New Roman, everything else Arial. Override it if a display or handwriting face is closer to one of the others. Width is matched on regular-weight lower-case text; bold falls back to the system font\'s real bold. Browsers that do not support the overrides (Safari before 17) simply ignore them.', 'mbr-performance' ); ?>
+            </p>
+            <script>
+            ( function () {
+                var btn = document.getElementById( 'mbrpe-measure-fonts' );
+                if ( ! btn ) { return; }
+                btn.addEventListener( 'click', function () {
+                    var out  = document.getElementById( 'mbrpe-measure-fonts-result' );
+                    var data = new FormData();
+                    data.append( 'action', 'mbrpe_measure_fonts' );
+                    data.append( 'nonce', <?php echo wp_json_encode( wp_create_nonce( 'mbrpe_nonce' ) ); ?> );
+                    btn.disabled    = true;
+                    out.textContent = <?php echo wp_json_encode( __( 'Measuring…', 'mbr-performance' ) ); ?>;
+                    fetch( ajaxurl, { method: 'POST', credentials: 'same-origin', body: data } )
+                        .then( function ( r ) { return r.json(); } )
+                        .then( function ( json ) {
+                            out.textContent = ( json && json.data && json.data.message ) ? json.data.message : '';
+                            if ( json && json.success ) { window.setTimeout( function () { window.location.reload(); }, 1200 ); }
+                            else { btn.disabled = false; }
+                        } )
+                        .catch( function () { out.textContent = <?php echo wp_json_encode( __( 'The request failed.', 'mbr-performance' ) ); ?>; btn.disabled = false; } );
+                } );
+            } )();
+            </script>
+        <?php elseif ( $ff_selfhost ) : ?>
+            <p class="description"><?php esc_html_e( 'No fonts have been downloaded yet. Once they are, each family is listed here with its measured fallback.', 'mbr-performance' ); ?></p>
+        <?php endif; ?>
+    </div>
+
     <!-- Google Fonts Optimization Section -->
     <div class="mbr-performance-section">
         <h2><?php esc_html_e( 'Google Fonts Optimization', 'mbr-performance' ); ?></h2>

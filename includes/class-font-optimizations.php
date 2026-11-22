@@ -182,6 +182,12 @@ class MBRPE_Font_Optimizations {
             return;
         }
 
+        // Metric-matched fallback faces (2.2.0), printed with the faces they
+        // stand in for so they cost no extra request.
+        if ( class_exists( 'MBRPE_Font_Fallback' ) ) {
+            $css .= MBRPE_Font_Fallback::font_face_css();
+        }
+
         wp_register_style( 'mbr-performance-local-fonts', false, array(), MBRPE_VERSION );
         wp_enqueue_style( 'mbr-performance-local-fonts' );
         wp_add_inline_style( 'mbr-performance-local-fonts', wp_strip_all_tags( $css ) );

@@ -818,6 +818,20 @@ class MBRPE_Page_Cache_Dropin {
 			case 'rewrite_config':
 				$result = self::write_config( true );
 				break;
+
+			// v2.2.0 — the object cache's repair buttons share this route.
+			case 'install_object_cache':
+			case 'replace_object_cache':
+				$result = MBRPE_Object_Cache::current_user_can_manage()
+					? MBRPE_Object_Cache::install( 'replace_object_cache' === $do )
+					: new WP_Error( 'mbrpe_oc_cap', __( 'Only a network administrator can change the object cache.', 'mbr-performance' ) );
+				break;
+
+			case 'remove_object_cache':
+				$result = MBRPE_Object_Cache::current_user_can_manage()
+					? MBRPE_Object_Cache::uninstall()
+					: new WP_Error( 'mbrpe_oc_cap', __( 'Only a network administrator can change the object cache.', 'mbr-performance' ) );
+				break;
 		}
 
 		$args = array( 'page' => 'mbr-performance', 'tab' => 'cache' );

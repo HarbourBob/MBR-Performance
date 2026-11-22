@@ -363,6 +363,312 @@ if ( isset( $_GET['mbrpe_cache_result'] ) ) { // phpcs:ignore WordPress.Security
 		</table>
 	</div>
 
+	<?php
+	// ================= OBJECT CACHE (MEMCACHED) — v2.2.0 =================
+	$oc        = MBRPE_Object_Cache::health();
+	$oc_set    = $oc['settings'];
+	$oc_info   = $oc['info'];
+	$oc_stats  = MBRPE_Object_Cache::summarise_stats( $oc['stats'] );
+	$oc_label  = MBRPE_Object_Cache::is_socket( $oc_set['host'] ) ? $oc_set['host'] : $oc_set['host'] . ':' . $oc_set['port'];
+	$oc_ours   = in_array( $oc['dropin_state'], array( 'ours-current', 'ours-stale' ), true );
+	?>
+	<div class="mbr-performance-section" id="mbrpe-object-cache">
+		<h2><?php esc_html_e( 'Object Cache (Memcached)', 'mbr-performance' ); ?></h2>
+		<p class="description" style="max-width:820px;">
+			<?php esc_html_e( 'Page caching saves finished pages. An object cache saves the database results WordPress builds pages from, in Memcached\'s memory, so they are not fetched again on every request. It speeds up everything a page cache cannot serve: logged-in visitors, wp-admin, WooCommerce carts and checkout, search, AJAX and REST requests.', 'mbr-performance' ); ?>
+		</p>
+
+		<?php if ( ! $oc['extension'] ) : ?>
+			<div class="notice notice-warning inline" style="margin:1em 0;">
+				<p><?php esc_html_e( 'The PHP Memcached extension is not installed on this server, so the object cache cannot be switched on. Many hosts let you enable it from the control panel (on SiteGround: Speed → Caching → Memcached); otherwise ask your host for the "memcached" PHP extension — not the older "memcache".', 'mbr-performance' ); ?></p>
+			</div>
+		<?php endif; ?>
+
+		<?php if ( 'foreign' === $oc['dropin_state'] ) : ?>
+			<div class="notice notice-warning inline" style="margin:1em 0;">
+				<p>
+					<?php
+					if ( '' !== $oc['foreign_name'] ) {
+						printf(
+							/* translators: %s: plugin that owns object-cache.php */
+							esc_html__( 'Another object cache is already installed: %s. MBR Performance will not replace it. If you would rather use this one, switch the other off first.', 'mbr-performance' ),
+							'<strong>' . esc_html( $oc['foreign_name'] ) . '</strong>'
+						);
+					} else {
+						esc_html_e( 'Another object cache is already installed in wp-content/object-cache.php, from another plugin or your host. MBR Performance will not replace it.', 'mbr-performance' );
+					}
+					?>
+				</p>
+			</div>
+		<?php endif; ?>
+
+		<?php if ( $oc_set['enabled'] && $oc['loaded'] && empty( $oc_info['connected'] ) ) : ?>
+			<div class="notice notice-error inline" style="margin:1em 0;">
+				<p>
+					<strong><?php esc_html_e( 'Memcached is not answering.', 'mbr-performance' ); ?></strong>
+					<?php
+					if ( isset( $oc_info['status'] ) && 'no-extension' === $oc_info['status'] ) {
+						esc_html_e( 'The PHP Memcached extension has gone missing, so the object cache is running from memory only — the same as having none. Nothing is broken, but nothing is being cached between requests either.', 'mbr-performance' );
+					} elseif ( isset( $oc_info['status'] ) && 'disabled' === $oc_info['status'] ) {
+						esc_html_e( 'MBRPE_OBJECT_CACHE_DISABLED is set in wp-config.php, so the object cache is running from memory only.', 'mbr-performance' );
+					} else {
+						printf(
+							/* translators: %s: host:port */
+							esc_html__( 'Nothing answered at %s, so the object cache is running from memory only — the same as having none. Nothing is broken, but nothing is being cached between requests either. Check Memcached is still switched on in your hosting control panel, or switch the object cache off below. When the server comes back the cache is flushed once automatically, so nothing out of date is served.', 'mbr-performance' ),
+							'<code>' . esc_html( $oc_label ) . '</code>'
+						);
+					}
+					?>
+				</p>
+			</div>
+		<?php endif; ?>
+
+		<table class="widefat striped" style="max-width:820px;">
+			<tbody>
+			<tr>
+				<td style="width:230px;"><strong><?php esc_html_e( 'PHP extension', 'mbr-performance' ); ?></strong></td>
+				<td>
+					<?php if ( $oc['extension'] ) : ?>
+						<span style="color:#1a7f37;">&#10003;</span>
+						<?php
+						printf(
+							/* translators: %s: extension version */
+							esc_html__( 'Memcached %s loaded', 'mbr-performance' ),
+							esc_html( $oc['ext_version'] )
+						);
+						?>
+					<?php else : ?>
+						<span style="color:#d63638;">&#10007;</span> <?php esc_html_e( 'Not installed', 'mbr-performance' ); ?>
+					<?php endif; ?>
+				</td>
+			</tr>
+			<tr>
+				<td><strong>object-cache.php</strong></td>
+				<td>
+					<?php
+					switch ( $oc['dropin_state'] ) {
+						case 'ours-current':
+							echo '<span style="color:#1a7f37;">&#10003;</span> ' . esc_html__( 'Installed and current', 'mbr-performance' );
+							break;
+						case 'ours-stale':
+							echo '<span style="color:#bd8600;">&#9888;</span> ' . esc_html__( 'Installed but from an older version — it should be refreshed.', 'mbr-performance' );
+							if ( $oc['can_manage'] ) {
+								echo ' <a class="button button-small" href="' . esc_url( MBRPE_Page_Cache_Dropin::action_url( 'install_object_cache' ) ) . '">' . esc_html__( 'Refresh', 'mbr-performance' ) . '</a>';
+							}
+							break;
+						case 'foreign':
+							echo '<span style="color:#d63638;">&#10007;</span> ' . esc_html__( 'Owned by another plugin or your host.', 'mbr-performance' );
+							if ( $oc['can_manage'] && $oc['extension'] ) {
+								echo ' <a class="button button-small" href="' . esc_url( MBRPE_Page_Cache_Dropin::action_url( 'replace_object_cache' ) ) . '" onclick="return confirm(\'' . esc_js( __( 'Replace the existing object-cache.php with the MBR Performance one? Do this only if the plugin that installed it has been removed — if it is still active, it may simply put its own back.', 'mbr-performance' ) ) . '\');">' . esc_html__( 'Replace', 'mbr-performance' ) . '</a>';
+							}
+							break;
+						default:
+							echo '<span style="color:#8c8f94;">&#9679;</span> ' . esc_html__( 'Not installed', 'mbr-performance' );
+							if ( $oc_set['enabled'] && $oc['extension'] && $oc['can_manage'] ) {
+								echo ' <a class="button button-small" href="' . esc_url( MBRPE_Page_Cache_Dropin::action_url( 'install_object_cache' ) ) . '">' . esc_html__( 'Install', 'mbr-performance' ) . '</a>';
+							}
+					}
+					?>
+				</td>
+			</tr>
+			<tr>
+				<td><strong><?php esc_html_e( 'This page load', 'mbr-performance' ); ?></strong></td>
+				<td>
+					<?php if ( $oc['loaded'] && ! empty( $oc_info['connected'] ) ) : ?>
+						<span style="color:#1a7f37;">&#9679;</span>
+						<?php
+						printf(
+							/* translators: 1: host:port, 2: cache hits, 3: cache misses */
+							esc_html__( 'Connected to %1$s — %2$s hits and %3$s misses building this screen.', 'mbr-performance' ),
+							'<code>' . esc_html( MBRPE_Object_Cache::is_socket( $oc_info['host'] ) ? $oc_info['host'] : $oc_info['host'] . ':' . $oc_info['port'] ) . '</code>',
+							esc_html( number_format_i18n( (int) $oc_info['hits'] ) ),
+							esc_html( number_format_i18n( (int) $oc_info['misses'] ) )
+						);
+						?>
+					<?php elseif ( $oc['loaded'] ) : ?>
+						<span style="color:#d63638;">&#9679;</span> <?php esc_html_e( 'Not connected — running from memory only.', 'mbr-performance' ); ?>
+					<?php elseif ( $oc['ext_cache_in_use'] ) : ?>
+						<span style="color:#8c8f94;">&#9679;</span> <?php esc_html_e( 'Another persistent object cache is serving this site.', 'mbr-performance' ); ?>
+					<?php else : ?>
+						<span style="color:#8c8f94;">&#9679;</span> <?php esc_html_e( 'No persistent object cache — WordPress is using its built-in, per-request cache.', 'mbr-performance' ); ?>
+					<?php endif; ?>
+				</td>
+			</tr>
+			<?php if ( '' !== $oc_stats['version'] ) : ?>
+			<tr>
+				<td><strong><?php esc_html_e( 'Memcached server', 'mbr-performance' ); ?></strong></td>
+				<td>
+					<?php
+					$oc_parts   = array();
+					$oc_parts[] = sprintf(
+						/* translators: %s: Memcached version */
+						__( 'version %s', 'mbr-performance' ),
+						$oc_stats['version']
+					);
+					if ( $oc_stats['uptime'] > 0 ) {
+						$oc_parts[] = sprintf(
+							/* translators: %s: human time, e.g. "3 days" */
+							__( 'up %s', 'mbr-performance' ),
+							human_time_diff( time() - $oc_stats['uptime'] )
+						);
+					}
+					if ( $oc_stats['limit'] > 0 ) {
+						$oc_parts[] = sprintf(
+							/* translators: 1: memory used, 2: memory limit */
+							__( '%1$s of %2$s used', 'mbr-performance' ),
+							size_format( $oc_stats['used'], 1 ),
+							size_format( $oc_stats['limit'], 0 )
+						);
+					}
+					$oc_parts[] = sprintf(
+						/* translators: %s: number of items */
+						__( '%s items', 'mbr-performance' ),
+						number_format_i18n( $oc_stats['items'] )
+					);
+					if ( null !== $oc_stats['hit_rate'] ) {
+						$oc_parts[] = sprintf(
+							/* translators: %s: percentage */
+							__( '%s%% hit rate since it started', 'mbr-performance' ),
+							number_format_i18n( $oc_stats['hit_rate'], 1 )
+						);
+					}
+					if ( $oc_stats['evictions'] > 0 ) {
+						$oc_parts[] = sprintf(
+							/* translators: %s: number of evictions */
+							__( '%s evictions — the server is short of memory', 'mbr-performance' ),
+							number_format_i18n( $oc_stats['evictions'] )
+						);
+					}
+					echo esc_html( implode( ' · ', $oc_parts ) );
+					?>
+					<br><span class="description"><?php esc_html_e( 'Figures cover the whole Memcached server, which may be shared with other sites.', 'mbr-performance' ); ?></span>
+				</td>
+			</tr>
+			<?php endif; ?>
+			</tbody>
+		</table>
+
+		<?php if ( $oc['can_manage'] ) : ?>
+		<table class="form-table">
+			<tr>
+				<th scope="row">
+					<label for="cache_memcached_enabled">
+						<?php esc_html_e( 'Enable Object Cache', 'mbr-performance' ); ?>
+						<span class="mbr-tooltip" data-tip="<?php esc_attr_e( 'Installs wp-content/object-cache.php, which keeps WordPress\'s internal cache in Memcached between requests instead of rebuilding it every time.', 'mbr-performance' ); ?>">?</span>
+					</label>
+				</th>
+				<td>
+					<input type="checkbox" name="mbrpe_options[cache][memcached_enabled]" id="cache_memcached_enabled" value="1" <?php checked( $oc_set['enabled'] ); ?> <?php disabled( ! $oc['extension'] || 'foreign' === $oc['dropin_state'] ); ?>>
+					<p class="description">
+						<?php esc_html_e( 'The server is tested before the cache is switched on, and it stays off if nothing answers. If Memcached later stops responding, the site carries on without it rather than failing.', 'mbr-performance' ); ?>
+					</p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row">
+					<label for="cache_memcached_host"><?php esc_html_e( 'IP Address', 'mbr-performance' ); ?></label>
+				</th>
+				<td>
+					<input type="text" name="mbrpe_options[cache][memcached_host]" id="cache_memcached_host" class="regular-text code" value="<?php echo esc_attr( $oc_set['host'] ); ?>" placeholder="127.0.0.1" autocomplete="off" spellcheck="false" <?php echo $oc_set['host_locked'] ? 'readonly' : ''; ?>>
+					<p class="description">
+						<?php if ( $oc_set['host_locked'] ) : ?>
+							<?php esc_html_e( 'Set by MBRPE_MEMCACHED_HOST in wp-config.php, which takes precedence over this field.', 'mbr-performance' ); ?>
+						<?php else : ?>
+							<?php esc_html_e( 'Usually 127.0.0.1, shown in your hosting control panel alongside the port. A hostname or the full path to a Unix socket also works.', 'mbr-performance' ); ?>
+						<?php endif; ?>
+					</p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row">
+					<label for="cache_memcached_port"><?php esc_html_e( 'Port', 'mbr-performance' ); ?></label>
+				</th>
+				<td>
+					<input type="number" name="mbrpe_options[cache][memcached_port]" id="cache_memcached_port" class="small-text" min="1" max="65535" step="1" value="<?php echo esc_attr( $oc_set['port'] > 0 ? $oc_set['port'] : MBRPE_Object_Cache::DEFAULT_PORT ); ?>" <?php echo $oc_set['port_locked'] ? 'readonly' : ''; ?>>
+					<p class="description">
+						<?php if ( $oc_set['port_locked'] ) : ?>
+							<?php esc_html_e( 'Set by MBRPE_MEMCACHED_PORT in wp-config.php.', 'mbr-performance' ); ?>
+						<?php else : ?>
+							<?php esc_html_e( 'Memcached\'s standard port is 11211. Some hosts give each site its own port instead — copy whatever the control panel shows. Ignored for a Unix socket.', 'mbr-performance' ); ?>
+						<?php endif; ?>
+					</p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row"><?php esc_html_e( 'Tools', 'mbr-performance' ); ?></th>
+				<td>
+					<button type="button" class="button button-secondary" id="mbrpe-memcached-test" <?php disabled( ! $oc['extension'] ); ?>><?php esc_html_e( 'Test Connection', 'mbr-performance' ); ?></button>
+					<button type="button" class="button button-secondary" id="mbrpe-object-cache-flush" <?php disabled( ! ( $oc['loaded'] && ! empty( $oc_info['connected'] ) ) ); ?>><?php esc_html_e( 'Flush Object Cache', 'mbr-performance' ); ?></button>
+					<p id="mbrpe-memcached-result" class="description" style="margin-top:8px;" aria-live="polite"></p>
+					<p class="description">
+						<?php esc_html_e( 'Test Connection checks the IP address and port typed above, without saving them. Flushing empties only this site\'s entries, so other sites sharing the same Memcached server are unaffected.', 'mbr-performance' ); ?>
+					</p>
+				</td>
+			</tr>
+		</table>
+		<?php else : ?>
+			<p class="description" style="max-width:820px;margin-top:1em;">
+				<?php esc_html_e( 'The object cache serves every site on this network, so it is set up from the main site by a network administrator.', 'mbr-performance' ); ?>
+			</p>
+		<?php endif; ?>
+	</div>
+
+	<script>
+	( function () {
+		var test   = document.getElementById( 'mbrpe-memcached-test' );
+		var flush  = document.getElementById( 'mbrpe-object-cache-flush' );
+		var result = document.getElementById( 'mbrpe-memcached-result' );
+		var nonce  = <?php echo wp_json_encode( wp_create_nonce( 'mbrpe_nonce' ) ); ?>;
+		if ( ! result ) { return; }
+
+		function say( text, ok ) {
+			result.textContent = text;
+			result.style.color = ( true === ok ) ? '#1a7f37' : ( false === ok ? '#d63638' : '' );
+		}
+
+		function post( fields, button, busy ) {
+			var data = new FormData();
+			Object.keys( fields ).forEach( function ( k ) { data.append( k, fields[ k ] ); } );
+			data.append( 'nonce', nonce );
+			button.disabled = true;
+			say( busy, null );
+			return fetch( ajaxurl, { method: 'POST', credentials: 'same-origin', body: data } )
+				.then( function ( r ) { return r.json(); } )
+				.then( function ( json ) {
+					button.disabled = false;
+					var msg = ( json && json.data && json.data.message ) ? json.data.message : '';
+					if ( json && json.success && json.data && json.data.summary && json.data.summary.limit ) {
+						var s    = json.data.summary;
+						var size = function ( b ) { return b >= 1048576 ? ( b / 1048576 ).toFixed( 1 ) + ' MB' : Math.max( 1, Math.round( b / 1024 ) ) + ' KB'; };
+						msg += ' ' + size( s.used ) + ' of ' + size( s.limit ) + ' in use.';
+					}
+					say( msg, !! ( json && json.success ) );
+				} )
+				.catch( function () {
+					button.disabled = false;
+					say( <?php echo wp_json_encode( __( 'The request failed. Check you are still logged in and try again.', 'mbr-performance' ) ); ?>, false );
+				} );
+		}
+
+		if ( test ) {
+			test.addEventListener( 'click', function () {
+				var host = document.getElementById( 'cache_memcached_host' );
+				var port = document.getElementById( 'cache_memcached_port' );
+				post(
+					{ action: 'mbrpe_memcached_test', host: host ? host.value : '', port: port ? port.value : '' },
+					test,
+					<?php echo wp_json_encode( __( 'Testing…', 'mbr-performance' ) ); ?>
+				);
+			} );
+		}
+		if ( flush ) {
+			flush.addEventListener( 'click', function () {
+				post( { action: 'mbrpe_object_cache_flush' }, flush, <?php echo wp_json_encode( __( 'Flushing…', 'mbr-performance' ) ); ?> );
+			} );
+		}
+	} )();
+	</script>
+
 	<script>
 	( function () {
 		var button = document.getElementById( 'mbrpe-purge-cache' );

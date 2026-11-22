@@ -345,7 +345,117 @@ class MBRPE_Admin {
             $sanitized[ $field ] = implode( "\n", array_unique( $clean ) );
         }
 
+        // v2.2.0 — Memcached object cache.
+        $sanitized = array_merge( $sanitized, $this->sanitize_memcached_options( $options ) );
+
         return $sanitized;
+    }
+
+    /**
+     * Sanitize the Memcached object-cache fields on the Cache tab (v2.2.0).
+     *
+     * The host and port are written into wp-content/object-cache.php, so they
+     * are validated, not merely cleaned: an unusable value keeps the previous
+     * one and says why. Switching the cache on also tests the server first —
+     * a drop-in pointed at nothing would simply run memory-only, which is
+     * safe but pointless, and much less obvious than an error on save.
+     *
+     * @since 2.2.0
+     * @param array $options Submitted cache section.
+     * @return array
+     */
+    private function sanitize_memcached_options( $options ) {
+        $existing = get_option( 'mbrpe_options', array() );
+        $previous = ( is_array( $existing ) && isset( $existing['cache'] ) && is_array( $existing['cache'] ) ) ? $existing['cache'] : array();
+
+        $prev_host = isset( $previous['memcached_host'] ) ? (string) $previous['memcached_host'] : MBRPE_Object_Cache::DEFAULT_HOST;
+        $prev_port = isset( $previous['memcached_port'] ) ? (int) $previous['memcached_port'] : MBRPE_Object_Cache::DEFAULT_PORT;
+        $prev_on   = ! empty( $previous['memcached_enabled'] );
+
+        // Only the network's main site, and only someone allowed to change it,
+        // may alter a setting that controls a network-wide drop-in. Everyone
+        // else keeps what is stored, whatever the form sent.
+        if ( ! MBRPE_Object_Cache::current_user_can_manage() || ! array_key_exists( 'memcached_host', $options ) ) {
+            return array(
+                'memcached_enabled' => $prev_on,
+                'memcached_host'    => $prev_host,
+                'memcached_port'    => $prev_port,
+            );
+        }
+
+        // options.php has already unslashed the submission.
+        $host = MBRPE_Object_Cache::validate_host( isset( $options['memcached_host'] ) ? (string) $options['memcached_host'] : '' );
+        if ( false === $host ) {
+            add_settings_error(
+                'mbrpe_options',
+                'mbrpe_memcached_host',
+                __( 'Memcached IP Address: that is not a valid IP address, hostname or socket path, so the previous value was kept.', 'mbr-performance' ),
+                'error'
+            );
+            $host = $prev_host;
+        }
+
+        if ( MBRPE_Object_Cache::is_socket( $host ) ) {
+            $port = 0;
+        } else {
+            $port = MBRPE_Object_Cache::validate_port( isset( $options['memcached_port'] ) ? $options['memcached_port'] : '' );
+            if ( false === $port ) {
+                add_settings_error(
+                    'mbrpe_options',
+                    'mbrpe_memcached_port',
+                    __( 'Memcached Port: it must be a whole number between 1 and 65535, so the previous value was kept.', 'mbr-performance' ),
+                    'error'
+                );
+                $port = $prev_port > 0 ? $prev_port : MBRPE_Object_Cache::DEFAULT_PORT;
+            }
+        }
+
+        $enabled = ! empty( $options['memcached_enabled'] );
+
+        // Test before switching on, or when an enabled cache is pointed at a
+        // different server. Constants in wp-config.php override the form, so
+        // the test uses whatever the drop-in will actually connect to.
+        $changed = ( $host !== $prev_host || (int) $port !== $prev_port );
+        if ( $enabled && ( ! $prev_on || $changed ) ) {
+            $test_host = defined( 'MBRPE_MEMCACHED_HOST' ) && '' !== (string) MBRPE_MEMCACHED_HOST ? (string) MBRPE_MEMCACHED_HOST : $host;
+            $test_port = defined( 'MBRPE_MEMCACHED_PORT' ) ? (int) MBRPE_MEMCACHED_PORT : $port;
+            $test      = MBRPE_Object_Cache::test_connection( $test_host, $test_port );
+            if ( ! $test['ok'] ) {
+                if ( $prev_on && $changed ) {
+                    // A working cache pointed at a new server that does not
+                    // answer: keep the one that works rather than switch off.
+                    add_settings_error(
+                        'mbrpe_options',
+                        'mbrpe_memcached_test',
+                        sprintf(
+                            /* translators: 1: reason the test failed, 2: the previous host:port */
+                            __( '%1$s The previous server, %2$s, was kept.', 'mbr-performance' ),
+                            $test['message'],
+                            MBRPE_Object_Cache::is_socket( $prev_host ) ? $prev_host : $prev_host . ':' . $prev_port
+                        ),
+                        'error'
+                    );
+                    $host    = $prev_host;
+                    $port    = $prev_port;
+                    $enabled = true;
+                } else {
+                    add_settings_error(
+                        'mbrpe_options',
+                        'mbrpe_memcached_test',
+                        /* translators: %s: reason the connection test failed */
+                        sprintf( __( 'The object cache was left off. %s', 'mbr-performance' ), $test['message'] ),
+                        'error'
+                    );
+                    $enabled = false;
+                }
+            }
+        }
+
+        return array(
+            'memcached_enabled' => $enabled,
+            'memcached_host'    => $host,
+            'memcached_port'    => (int) $port,
+        );
     }
 
     /**
@@ -494,10 +604,24 @@ class MBRPE_Admin {
             'load_block_styles_conditionally',
             'remove_css_versions',
             'disable_woocommerce_css',
+            'cv_enabled',
         );
         
         foreach ( $boolean_fields as $field ) {
             $sanitized[ $field ] = isset( $options[ $field ] ) ? (bool) $options[ $field ] : false;
+        }
+
+        // content-visibility (2.2.0). The selectors are printed inside a
+        // <style> element, so they are validated one by one rather than
+        // cleaned as text: anything that is not plainly a selector is dropped.
+        if ( isset( $options['cv_selectors'] ) ) {
+            $sanitized['cv_selectors'] = implode( "\n", MBRPE_Render_Optimizations::parse_selectors( (string) $options['cv_selectors'] ) );
+        }
+        if ( isset( $options['cv_skip'] ) ) {
+            $sanitized['cv_skip'] = max( 0, min( 20, absint( $options['cv_skip'] ) ) );
+        }
+        if ( isset( $options['cv_height'] ) ) {
+            $sanitized['cv_height'] = max( 50, min( 5000, absint( $options['cv_height'] ) ) );
         }
         
         // Textarea options
@@ -554,6 +678,8 @@ class MBRPE_Admin {
             'disable_local_fallback',
             'remove_font_display',
             'disable_elementor_fonts',
+            'fallback_metrics',
+            'fallback_rewrite',
         );
         
         foreach ( $boolean_fields as $field ) {
@@ -581,6 +707,23 @@ class MBRPE_Admin {
         
         if ( isset( $options['character_sets'] ) && is_array( $options['character_sets'] ) ) {
             $sanitized['character_sets'] = array_map( 'sanitize_text_field', $options['character_sets'] );
+        }
+
+        // Font fallback metrics (2.2.0): the fallback chosen per family. Keys
+        // are lower-cased family names, values one of a fixed set.
+        $sanitized['fallback_overrides'] = array();
+        if ( isset( $options['fallback_overrides'] ) && is_array( $options['fallback_overrides'] ) ) {
+            $known = array();
+            foreach ( array_keys( MBRPE_Font_Fallback::local_families() ) as $local ) {
+                $known[ MBRPE_Font_Fallback::family_key( (string) $local ) ] = true;
+            }
+            foreach ( $options['fallback_overrides'] as $family => $choice ) {
+                $key    = MBRPE_Font_Fallback::family_key( (string) $family );
+                $choice = sanitize_key( (string) $choice );
+                if ( isset( $known[ $key ] ) && in_array( $choice, array( 'sans', 'serif', 'mono' ), true ) ) {
+                    $sanitized['fallback_overrides'][ $key ] = $choice;
+                }
+            }
         }
         
         return $sanitized;
@@ -971,7 +1114,15 @@ class MBRPE_Admin {
         <div class="wrap mbr-performance-wrap">
             <h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
             
-            <?php settings_errors( 'mbrpe_options' ); ?>
+            <?php
+            // Notices from a save that switched the object cache on or off,
+            // which cannot travel in the usual transient (see
+            // MBRPE_Object_Cache::carry_settings_errors()).
+            if ( class_exists( 'MBRPE_Object_Cache' ) ) {
+                MBRPE_Object_Cache::restore_settings_errors();
+            }
+            settings_errors( 'mbrpe_options' );
+            ?>
             
             <?php
             // Multisite: show notice when per-site overrides are disabled
@@ -2482,6 +2633,12 @@ class MBRPE_Admin {
         // Clear the font configuration
         delete_option( 'mbrpe_local_fonts' );
         delete_option( 'mbrpe_fonts_dir' );
+
+        // With no fonts left there is nothing for a fallback to stand in for.
+        if ( class_exists( 'MBRPE_Font_Fallback' ) ) {
+            delete_option( MBRPE_Font_Fallback::OPTION );
+            MBRPE_Font_Fallback::after_fonts_changed();
+        }
         
         if ( $deleted_files > 0 ) {
             $message = sprintf( 
@@ -2639,6 +2796,12 @@ class MBRPE_Admin {
         // there, and cleanup_old_fonts() would keep reserving space for it.
         update_option( 'mbrpe_local_fonts', $resolved_fonts );
         update_option( 'mbrpe_fonts_dir', $fonts_dir );
+
+        // Font fallback metrics (2.2.0): measure any family just added, and
+        // rebuild the stylesheets that point at the fallbacks.
+        if ( class_exists( 'MBRPE_Font_Fallback' ) ) {
+            MBRPE_Font_Fallback::after_fonts_changed();
+        }
         
         $message = sprintf( 
             // translators: 1 = number of font variants downloaded, 2 = number of failed downloads.
